@@ -85,6 +85,8 @@ async fn main() -> anyhow::Result<()> {
     let network_url = &get_network(&cli.url.unwrap_or(config.json_rpc_url)).to_string();
     let client = RpcClient::new_with_commitment(network_url.to_string(), commitment);
 
+    let sdk = phoenix_sdk::sdk_client::SDKClient::new(&payer, network_url).await?;
+
     let Arguments {
         market,
         ticker,
@@ -95,6 +97,12 @@ async fn main() -> anyhow::Result<()> {
         post_only,
         ..
     } = cli;
+
+    let maker_setup_instructions = sdk.get_maker_setup_instructions_for_market(&market).await?;
+    sdk.client
+        .sign_send_instructions(maker_setup_instructions, vec![])
+        .await
+        .unwrap();
 
     let strategy_key = Pubkey::find_program_address(
         &[b"phoenix", payer.pubkey().as_ref(), market.as_ref()],
