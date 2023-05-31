@@ -1,0 +1,39 @@
+[features]
+seeds = false
+skip-lint = false
+[programs.localnet]
+phoenix_onchain_mm = "MM1BW8uAmQ1zXP8mi8izfGQfjB1ASZhh93Tteo9LUfW"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "Localnet"
+wallet = "/Users/x/.config/solana/id.json"
+
+[scripts]
+test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+
+[[test.genesis]]
+address = "PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY"
+program = "./deps/phoenix_dex.so"
+
+[[test.validator.account]]
+address = "HhHRvLFvZid6FD7C96H93F2MkASjYfYAx8Y2P8KMAr6b"
+filename = "./deps/configs/phoenix_sol_usdc_market.json"
+
+[[test.validator.account]]
+address = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+filename = "./deps/configs/usdc.json"
+
+[[test.validator.account]]
+address = "GDqLPXfwDHXnqwfqtEJmqovA4KEy9XhoZxkg3MVyFK9N"
+filename = "./deps/configs/phoenix_sol_usdc_seat.json"
+
+[[test.validator.account]]
+address = "EyZsJZJWXuix6Zgw34JXb2fAbF4d62nfUgp4tzZBPxhW"
+filename = "./deps/configs/phoenix_sol_usdc_base_vault.json"
+
+[[test.validator.account]]
+address = "B9SETfVeH1vx7sEJ7v41CRJncJnpMpGxHg4Mztc3sZKX"
+filename = "./deps/configs/phoenix_sol_usdc_quote_vault.json"
