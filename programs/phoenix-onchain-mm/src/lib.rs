@@ -571,10 +571,10 @@ pub struct UpdateQuotes<'info> {
     pub phoenix_program: Program<'info, PhoenixV1>,
     /// CHECK: Checked in CPI
     pub log_authority: UncheckedAccount<'info>,
-    /// CHECK: Checked in CPI
+    /// CHECK: Checked in instruction and CPI
     #[account(mut)]
     pub market: UncheckedAccount<'info>,
-    /// CHECK: Checked in instruction and CPI
+    /// CHECK: Checked in CPI
     pub seat: UncheckedAccount<'info>,
     /// CHECK: Checked in CPI
     #[account(mut)]
