@@ -290,12 +290,14 @@ pub mod phoenix_onchain_mm {
 
         // Compute quote amounts in base lots
         let size_in_quote_lots =
-            phoenix_strategy.quote_size_in_quote_atoms * header.get_quote_lot_size().as_u64();
+            phoenix_strategy.quote_size_in_quote_atoms / header.get_quote_lot_size().as_u64();
 
-        let bid_size_in_base_lots =
-            size_in_quote_lots / (bid_price_in_ticks * market.get_tick_size().as_u64());
-        let ask_size_in_base_lots =
-            size_in_quote_lots / (ask_price_in_ticks * market.get_tick_size().as_u64());
+        let bid_size_in_base_lots = size_in_quote_lots
+            * market.get_base_lots_per_base_unit().as_u64()
+            / (bid_price_in_ticks * market.get_tick_size().as_u64());
+        let ask_size_in_base_lots = size_in_quote_lots
+            * market.get_base_lots_per_base_unit().as_u64()
+            / (ask_price_in_ticks * market.get_tick_size().as_u64());
 
         msg!(
             "Our market: {} {} @ {} {}",

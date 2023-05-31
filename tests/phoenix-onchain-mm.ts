@@ -225,15 +225,6 @@ describe("phoenix-onchain-mm", () => {
     );
   });
   it("Is initialized!", async () => {
-    const [phoenixStrategy] = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from("phoenix"),
-        god.publicKey.toBuffer(),
-        solMarketAddress.toBuffer(),
-      ],
-      program.programId
-    );
-
     const params = {
       quoteEdgeInBps: new BN(2),
       quoteSizeInQuoteAtoms: new BN(500 * 1e6),
@@ -246,7 +237,6 @@ describe("phoenix-onchain-mm", () => {
     const tx = await program.methods
       .initialize(params)
       .accounts({
-        phoenixStrategy,
         user: god.publicKey,
         market: solMarketAddress,
         systemProgram: SystemProgram.programId,
@@ -273,7 +263,6 @@ describe("phoenix-onchain-mm", () => {
           strategyParams: params,
         })
         .accounts({
-          phoenixStrategy,
           user: god.publicKey,
           market: solMarketAddress,
           phoenixProgram: Phoenix.PROGRAM_ID,

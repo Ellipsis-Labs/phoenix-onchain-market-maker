@@ -1,5 +1,5 @@
 [features]
-seeds = false
+seeds = true
 skip-lint = false
 [programs.localnet]
 phoenix_onchain_mm = "MM1BW8uAmQ1zXP8mi8izfGQfjB1ASZhh93Tteo9LUfW"
