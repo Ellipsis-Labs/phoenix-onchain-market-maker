@@ -148,7 +148,7 @@ pub struct StrategyParams {
     pub quote_edge_in_bps: Option<u64>,
     pub quote_size_in_quote_atoms: Option<u64>,
     pub price_improvement_behavior: Option<PriceImprovementBehavior>,
-    pub post_only: bool,
+    pub post_only: Option<bool>,
 }
 
 #[program]
@@ -192,7 +192,7 @@ pub mod phoenix_onchain_mm {
             last_update_unix_timestamp: clock.unix_timestamp,
             quote_edge_in_bps: params.quote_edge_in_bps.unwrap(),
             quote_size_in_quote_atoms: params.quote_size_in_quote_atoms.unwrap(),
-            post_only: params.post_only,
+            post_only: params.post_only.unwrap_or(false),
             price_improvement_behavior: params.price_improvement_behavior.unwrap().to_u8(),
             padding: [0; 6],
         };
@@ -230,7 +230,9 @@ pub mod phoenix_onchain_mm {
         if let Some(size) = params.strategy_params.quote_size_in_quote_atoms {
             phoenix_strategy.quote_size_in_quote_atoms = size;
         }
-        phoenix_strategy.post_only = params.strategy_params.post_only;
+        if let Some(post_only) = params.strategy_params.post_only {
+            phoenix_strategy.post_only = post_only;
+        }
         if let Some(price_improvement_behavior) = params.strategy_params.price_improvement_behavior
         {
             phoenix_strategy.price_improvement_behavior = price_improvement_behavior.to_u8();
@@ -247,11 +249,7 @@ pub mod phoenix_onchain_mm {
             })?
             .inner;
 
-        let trader_index = market.get_trader_index(&user.key()).unwrap_or(u32::MAX) as u64;
-
-        let size_in_quote_lots =
-            phoenix_strategy.quote_size_in_quote_atoms * header.get_quote_lot_size().as_u64();
-
+        // Compute quote prices
         let mut bid_price_in_ticks = get_bid_price(
             params.fair_price_in_quote_atoms_per_raw_base_unit,
             &header,
@@ -265,15 +263,17 @@ pub mod phoenix_onchain_mm {
         );
 
         // Returns the best bid and ask prices that are not placed by the trader
+        let trader_index = market.get_trader_index(&user.key()).unwrap_or(u32::MAX) as u64;
         let (best_bid, best_ask) = get_best_bid_and_ask(market, trader_index);
 
         msg!("Current market: {} @ {}", best_bid, best_ask);
 
         let price_improvement_behavior =
             PriceImprovementBehavior::from_u8(phoenix_strategy.price_improvement_behavior);
-
         match price_improvement_behavior {
             PriceImprovementBehavior::Join => {
+                // If price_improvement_behavior is set to Join, we will always join the best bid and ask
+                // if our quote prices are within the spread
                 ask_price_in_ticks = ask_price_in_ticks.max(best_ask);
                 bid_price_in_ticks = bid_price_in_ticks.min(best_bid);
             }
@@ -282,12 +282,18 @@ pub mod phoenix_onchain_mm {
                 ask_price_in_ticks = ask_price_in_ticks.max(best_ask - 1);
                 bid_price_in_ticks = bid_price_in_ticks.min(best_bid + 1);
             }
-            _ => {}
+            PriceImprovementBehavior::Ignore => {
+                // If price_improvement_behavior is set to Ignore, we will not update our quotes based off the current
+                // market prices
+            }
         }
+
+        // Compute quote amounts in base lots
+        let size_in_quote_lots =
+            phoenix_strategy.quote_size_in_quote_atoms * header.get_quote_lot_size().as_u64();
 
         let bid_size_in_base_lots =
             size_in_quote_lots / (bid_price_in_ticks * market.get_tick_size().as_u64());
-
         let ask_size_in_base_lots =
             size_in_quote_lots / (ask_price_in_ticks * market.get_tick_size().as_u64());
 
@@ -299,8 +305,8 @@ pub mod phoenix_onchain_mm {
             ask_size_in_base_lots
         );
 
-        let mut changed_bid = true;
-        let mut changed_ask = true;
+        let mut update_bid = true;
+        let mut update_ask = true;
         let orders_to_cancel = [
             (
                 Side::Bid,
@@ -329,8 +335,8 @@ pub mod phoenix_onchain_mm {
                     && order_id.price_in_ticks.as_u64() == *price
                 {
                     match side {
-                        Side::Bid => changed_bid = false,
-                        Side::Ask => changed_ask = false,
+                        Side::Bid => update_bid = false,
+                        Side::Ask => update_ask = false,
                     }
                     return None;
                 }
@@ -371,14 +377,19 @@ pub mod phoenix_onchain_mm {
             )?;
         }
 
+        // Don't update quotes if the price is invalid or if the sizes are 0
+        update_bid &= bid_price_in_ticks > 1 && bid_size_in_base_lots > 0;
+        update_ask &= ask_price_in_ticks < u64::MAX && ask_size_in_base_lots > 0;
+
         let client_order_id = u128::from_le_bytes(user.key().to_bytes()[..16].try_into().unwrap());
-        if !changed_ask && !changed_bid {
-            msg!("No orders to change");
+        if !update_ask && !update_bid {
+            msg!("No orders to update");
             return Ok(());
         }
         if phoenix_strategy.post_only
             || !matches!(price_improvement_behavior, PriceImprovementBehavior::Join)
         {
+            // Send multiple post-only orders in a single instruction
             invoke(
                 &phoenix::program::create_new_multiple_order_instruction_with_custom_token_accounts(
                     &market_account.key(),
@@ -388,7 +399,7 @@ pub mod phoenix_onchain_mm {
                     &header.base_params.mint_key,
                     &header.quote_params.mint_key,
                     &MultipleOrderPacket::new(
-                        if changed_bid {
+                        if update_bid {
                             vec![CondensedOrder::new_default(
                                 bid_price_in_ticks,
                                 bid_size_in_base_lots,
@@ -396,7 +407,7 @@ pub mod phoenix_onchain_mm {
                         } else {
                             vec![]
                         },
-                        if changed_ask {
+                        if update_ask {
                             vec![CondensedOrder::new_default(
                                 ask_price_in_ticks,
                                 ask_size_in_base_lots,
@@ -422,7 +433,7 @@ pub mod phoenix_onchain_mm {
                 ],
             )?;
         } else {
-            if changed_bid {
+            if update_bid {
                 invoke(
                     &phoenix::program::create_new_order_instruction_with_custom_token_accounts(
                         &market_account.key(),
@@ -457,7 +468,7 @@ pub mod phoenix_onchain_mm {
                     ],
                 )?;
             }
-            if changed_ask {
+            if update_ask {
                 invoke(
                     &phoenix::program::create_new_order_instruction_with_custom_token_accounts(
                         &market_account.key(),
@@ -503,7 +514,7 @@ pub mod phoenix_onchain_mm {
             })?
             .inner;
 
-        if changed_bid {
+        if update_bid {
             // Reverse the bits of the order_sequence_number for bids
             let bid_order_id =
                 FIFOOrderId::new_from_untyped(bid_price_in_ticks, !order_sequence_number);
@@ -521,7 +532,7 @@ pub mod phoenix_onchain_mm {
                     msg!("Bid order not found");
                 });
         }
-        if changed_ask {
+        if update_ask {
             let ask_order_id =
                 FIFOOrderId::new_from_untyped(ask_price_in_ticks, order_sequence_number);
             market
@@ -537,7 +548,6 @@ pub mod phoenix_onchain_mm {
                     msg!("Ask order not found");
                 });
         }
-
         Ok(())
     }
 }
