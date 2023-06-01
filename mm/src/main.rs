@@ -124,7 +124,7 @@ async fn main() -> anyhow::Result<()> {
 
     let price_improvement = match price_improvement_behavior.as_str() {
         "Join" | "join" => PriceImprovementBehavior::Join,
-        "Dime" | "dime" => PriceImprovementBehavior::Ignore,
+        "Dime" | "dime" => PriceImprovementBehavior::Dime,
         "Ignore" | "ignore" => PriceImprovementBehavior::Ignore,
         _ => PriceImprovementBehavior::Join,
     };
@@ -221,8 +221,17 @@ async fn main() -> anyhow::Result<()> {
             &[&payer],
             client.get_latest_blockhash().await?,
         );
-        let txid = client.send_and_confirm_transaction(&transaction).await?;
-        println!("Sending order: {}", txid);
+        if client
+            .send_and_confirm_transaction(&transaction)
+            .await
+            .and_then(|sig| {
+                println!("Updating quotes: {}", sig);
+                Ok(())
+            })
+            .is_err()
+        {
+            println!("Failed to update quotes");
+        };
 
         tokio::time::sleep(std::time::Duration::from_millis(
             quote_refresh_frequency_in_ms,

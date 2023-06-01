@@ -62,7 +62,7 @@ fn get_best_bid_and_ask(
     (best_bid, best_ask)
 }
 
-fn get_bid_price(
+fn get_bid_price_in_ticks(
     fair_price_in_quote_atoms_per_raw_base_unit: u64,
     header: &MarketHeader,
     edge_in_bps: u64,
@@ -74,7 +74,7 @@ fn get_bid_price(
     fair_price_in_ticks - edge_in_ticks
 }
 
-fn get_ask_price(
+fn get_ask_price_in_ticks(
     fair_price_in_quote_atoms_per_raw_base_unit: u64,
     header: &MarketHeader,
     edge_in_bps: u64,
@@ -250,13 +250,13 @@ pub mod phoenix_onchain_mm {
             .inner;
 
         // Compute quote prices
-        let mut bid_price_in_ticks = get_bid_price(
+        let mut bid_price_in_ticks = get_bid_price_in_ticks(
             params.fair_price_in_quote_atoms_per_raw_base_unit,
             &header,
             phoenix_strategy.quote_edge_in_bps,
         );
 
-        let mut ask_price_in_ticks = get_ask_price(
+        let mut ask_price_in_ticks = get_ask_price_in_ticks(
             params.fair_price_in_quote_atoms_per_raw_base_unit,
             &header,
             phoenix_strategy.quote_edge_in_bps,

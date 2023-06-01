@@ -277,7 +277,7 @@ describe("phoenix-onchain-mm", () => {
         .signers([god])
         .rpc({ skipPreflight: true });
       console.log("Update, price =", price, ":", tx);
-      await new Promise((r) => setTimeout(r, 5000));
+      await new Promise((r) => setTimeout(r, 1000));
     }
   });
 });
