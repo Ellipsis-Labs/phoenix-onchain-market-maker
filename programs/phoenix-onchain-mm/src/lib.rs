@@ -3,9 +3,12 @@ use anchor_lang::{
     prelude::*,
     solana_program::program::invoke,
 };
+use phoenix::program::{
+    new_order::{CondensedOrder, MultipleOrderPacket},
+    CancelMultipleOrdersByIdParams, CancelOrderParams, MarketHeader,
+};
 use phoenix::{
-    program::MarketHeader,
-    quantities::{Ticks, WrapperU64},
+    quantities::WrapperU64,
     state::{
         markets::{FIFOOrderId, FIFORestingOrder, Market},
         OrderPacket, Side,
@@ -153,15 +156,6 @@ pub struct StrategyParams {
 
 #[program]
 pub mod phoenix_onchain_mm {
-    use phoenix::{
-        program::{
-            new_order::{CondensedOrder, MultipleOrderPacket},
-            CancelMultipleOrdersByIdParams, CancelOrderParams,
-        },
-        quantities::BaseLots,
-        state::Side,
-    };
-
     use super::*;
 
     pub fn initialize(ctx: Context<Initialize>, params: StrategyParams) -> Result<()> {
@@ -392,6 +386,26 @@ pub mod phoenix_onchain_mm {
             || !matches!(price_improvement_behavior, PriceImprovementBehavior::Join)
         {
             // Send multiple post-only orders in a single instruction
+            let multiple_order_packet = MultipleOrderPacket::new(
+                if update_bid {
+                    vec![CondensedOrder::new_default(
+                        bid_price_in_ticks,
+                        bid_size_in_base_lots,
+                    )]
+                } else {
+                    vec![]
+                },
+                if update_ask {
+                    vec![CondensedOrder::new_default(
+                        ask_price_in_ticks,
+                        ask_size_in_base_lots,
+                    )]
+                } else {
+                    vec![]
+                },
+                Some(client_order_id),
+                false,
+            );
             invoke(
                 &phoenix::program::create_new_multiple_order_instruction_with_custom_token_accounts(
                     &market_account.key(),
@@ -400,26 +414,7 @@ pub mod phoenix_onchain_mm {
                     &quote_account.key(),
                     &header.base_params.mint_key,
                     &header.quote_params.mint_key,
-                    &MultipleOrderPacket::new(
-                        if update_bid {
-                            vec![CondensedOrder::new_default(
-                                bid_price_in_ticks,
-                                bid_size_in_base_lots,
-                            )]
-                        } else {
-                            vec![]
-                        },
-                        if update_ask {
-                            vec![CondensedOrder::new_default(
-                                ask_price_in_ticks,
-                                ask_size_in_base_lots,
-                            )]
-                        } else {
-                            vec![]
-                        },
-                        Some(client_order_id),
-                        false,
-                    ),
+                    &multiple_order_packet,
                 ),
                 &[
                     phoenix_program.to_account_info(),
@@ -444,17 +439,12 @@ pub mod phoenix_onchain_mm {
                         &quote_account.key(),
                         &header.base_params.mint_key,
                         &header.quote_params.mint_key,
-                        &OrderPacket::Limit {
-                            side: Side::Bid,
-                            price_in_ticks: Ticks::new(bid_price_in_ticks),
-                            num_base_lots: BaseLots::new(bid_size_in_base_lots),
-                            self_trade_behavior: phoenix::state::SelfTradeBehavior::CancelProvide,
-                            match_limit: None,
+                        &OrderPacket::new_limit_order_default_with_client_order_id(
+                            Side::Bid,
+                            bid_price_in_ticks,
+                            bid_size_in_base_lots,
                             client_order_id,
-                            use_only_deposited_funds: false,
-                            last_valid_slot: None,
-                            last_valid_unix_timestamp_in_seconds: None,
-                        },
+                        ),
                     ),
                     &[
                         phoenix_program.to_account_info(),
@@ -479,17 +469,12 @@ pub mod phoenix_onchain_mm {
                         &quote_account.key(),
                         &header.base_params.mint_key,
                         &header.quote_params.mint_key,
-                        &OrderPacket::Limit {
-                            side: Side::Ask,
-                            price_in_ticks: Ticks::new(ask_price_in_ticks),
-                            num_base_lots: BaseLots::new(ask_size_in_base_lots),
-                            self_trade_behavior: phoenix::state::SelfTradeBehavior::CancelProvide,
-                            match_limit: None,
+                        &OrderPacket::new_limit_order_default_with_client_order_id(
+                            Side::Ask,
+                            ask_price_in_ticks,
+                            ask_size_in_base_lots,
                             client_order_id,
-                            use_only_deposited_funds: false,
-                            last_valid_slot: None,
-                            last_valid_unix_timestamp_in_seconds: None,
-                        },
+                        ),
                     ),
                     &[
                         phoenix_program.to_account_info(),
