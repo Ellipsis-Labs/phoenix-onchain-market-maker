@@ -1,7 +1,7 @@
 use anchor_lang::{
     __private::bytemuck::{self},
     prelude::*,
-    solana_program::program::invoke,
+    solana_program::program::{get_return_data, invoke},
 };
 use phoenix::program::{
     new_order::{CondensedOrder, MultipleOrderPacket},
@@ -26,6 +26,32 @@ impl anchor_lang::Id for PhoenixV1 {
     }
 }
 pub const PHOENIX_MARKET_DISCRIMINANT: u64 = 8167313896524341111;
+
+#[derive(AnchorDeserialize, AnchorSerialize, Clone, Copy)]
+struct DeserializedFIFOOrderId {
+    pub price_in_ticks: u64,
+    pub order_sequence_number: u64,
+}
+
+fn parse_order_ids_from_return_data(order_ids: &mut Vec<FIFOOrderId>) -> Result<()> {
+    if let Some((program_id, orders_data)) = get_return_data() {
+        msg!("Found return data");
+        if program_id == phoenix::id() && !orders_data.is_empty() {
+            msg!("Found orders in return data");
+            Vec::<DeserializedFIFOOrderId>::try_from_slice(&orders_data)?
+                .into_iter()
+                .for_each(|o| {
+                    order_ids.push(FIFOOrderId::new_from_untyped(
+                        o.price_in_ticks,
+                        o.order_sequence_number,
+                    ))
+                });
+        } else {
+            msg!("No orders in return data");
+        }
+    }
+    Ok(())
+}
 
 fn load_header(info: &AccountInfo) -> Result<MarketHeader> {
     require!(
@@ -330,19 +356,22 @@ pub mod phoenix_onchain_mm {
                 if resting_order.num_base_lots == *initial_size
                     && order_id.price_in_ticks.as_u64() == *price
                 {
+                    msg!("Resting order is identical: {:?}", order_id);
                     match side {
                         Side::Bid => update_bid = false,
                         Side::Ask => update_ask = false,
                     }
                     return None;
                 }
+                msg!("Found partially filled resting order: {:?}", order_id);
+                // The order has been partially filled or reduced
                 return Some(*order_id);
             }
+            msg!("Failed to find resting order: {:?}", order_id);
+            // The order has been fully filled
             None
         })
         .collect::<Vec<FIFOOrderId>>();
-
-        let mut order_sequence_number = market.get_sequence_number();
 
         // Drop reference prior to invoking
         drop(market_data);
@@ -378,10 +407,11 @@ pub mod phoenix_onchain_mm {
         update_ask &= ask_price_in_ticks < u64::MAX && ask_size_in_base_lots > 0;
 
         let client_order_id = u128::from_le_bytes(user.key().to_bytes()[..16].try_into().unwrap());
-        if !update_ask && !update_bid {
+        if !update_ask && !update_bid && orders_to_cancel.is_empty() {
             msg!("No orders to update");
             return Ok(());
         }
+        let mut order_ids = vec![];
         if phoenix_strategy.post_only
             || !matches!(price_improvement_behavior, PriceImprovementBehavior::Join)
         {
@@ -429,6 +459,7 @@ pub mod phoenix_onchain_mm {
                     token_program.to_account_info(),
                 ],
             )?;
+            parse_order_ids_from_return_data(&mut order_ids)?;
         } else {
             if update_bid {
                 invoke(
@@ -459,6 +490,7 @@ pub mod phoenix_onchain_mm {
                         token_program.to_account_info(),
                     ],
                 )?;
+                parse_order_ids_from_return_data(&mut order_ids)?;
             }
             if update_ask {
                 invoke(
@@ -489,6 +521,7 @@ pub mod phoenix_onchain_mm {
                         token_program.to_account_info(),
                     ],
                 )?;
+                parse_order_ids_from_return_data(&mut order_ids)?;
             }
         }
 
@@ -501,40 +534,44 @@ pub mod phoenix_onchain_mm {
             })?
             .inner;
 
-        if update_bid {
-            // Reverse the bits of the order_sequence_number for bids
-            let bid_order_id =
-                FIFOOrderId::new_from_untyped(bid_price_in_ticks, !order_sequence_number);
-            market
-                .get_book(Side::Bid)
-                .get(&bid_order_id)
-                .map(|order| {
-                    msg!("Placed bid order");
-                    phoenix_strategy.bid_price_in_ticks = bid_price_in_ticks;
-                    phoenix_strategy.bid_order_sequence_number = !order_sequence_number;
-                    phoenix_strategy.initial_bid_size_in_base_lots = order.num_base_lots.as_u64();
-                    order_sequence_number += 1;
-                })
-                .unwrap_or_else(|| {
-                    msg!("Bid order not found");
-                });
+        for order_id in order_ids.iter() {
+            let side = Side::from_order_sequence_number(order_id.order_sequence_number);
+            match side {
+                Side::Ask => {
+                    market
+                        .get_book(Side::Ask)
+                        .get(&order_id)
+                        .map(|order| {
+                            msg!("Placed Ask Order: {:?}", order_id);
+                            phoenix_strategy.ask_price_in_ticks = order_id.price_in_ticks.as_u64();
+                            phoenix_strategy.ask_order_sequence_number =
+                                order_id.order_sequence_number;
+                            phoenix_strategy.initial_ask_size_in_base_lots =
+                                order.num_base_lots.as_u64();
+                        })
+                        .unwrap_or_else(|| {
+                            msg!("Ask order not found");
+                        });
+                }
+                Side::Bid => {
+                    market
+                        .get_book(Side::Bid)
+                        .get(&order_id)
+                        .map(|order| {
+                            msg!("Placed Bid Order: {:?}", order_id);
+                            phoenix_strategy.bid_price_in_ticks = order_id.price_in_ticks.as_u64();
+                            phoenix_strategy.bid_order_sequence_number =
+                                order_id.order_sequence_number;
+                            phoenix_strategy.initial_bid_size_in_base_lots =
+                                order.num_base_lots.as_u64();
+                        })
+                        .unwrap_or_else(|| {
+                            msg!("Bid order not found");
+                        });
+                }
+            }
         }
-        if update_ask {
-            let ask_order_id =
-                FIFOOrderId::new_from_untyped(ask_price_in_ticks, order_sequence_number);
-            market
-                .get_book(Side::Ask)
-                .get(&ask_order_id)
-                .map(|order| {
-                    msg!("Placed ask order");
-                    phoenix_strategy.ask_price_in_ticks = ask_price_in_ticks;
-                    phoenix_strategy.ask_order_sequence_number = order_sequence_number;
-                    phoenix_strategy.initial_ask_size_in_base_lots = order.num_base_lots.as_u64();
-                })
-                .unwrap_or_else(|| {
-                    msg!("Ask order not found");
-                });
-        }
+
         Ok(())
     }
 }
@@ -592,6 +629,7 @@ pub struct UpdateQuotes<'info> {
 // An enum for custom error codes
 #[error_code]
 pub enum StrategyError {
+    NoReturnData,
     InvalidStrategyParams,
     EdgeMustBeNonZero,
     InvalidPhoenixProgram,

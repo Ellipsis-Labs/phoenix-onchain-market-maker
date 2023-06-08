@@ -10,6 +10,7 @@ use phoenix_onchain_mm::PriceImprovementBehavior;
 use phoenix_onchain_mm::StrategyParams;
 use solana_cli_config::{Config, ConfigInput, CONFIG_FILE};
 use solana_client::nonblocking::rpc_client::RpcClient;
+use solana_client::rpc_config::RpcSendTransactionConfig;
 use solana_sdk::instruction::Instruction;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::read_keypair_file;
@@ -55,7 +56,7 @@ struct Arguments {
     quote_edge_in_bps: u64,
     #[clap(long, default_value = "100000000")]
     quote_size: u64,
-    #[clap(long, default_value = "join")]
+    #[clap(long, default_value = "ignore")]
     price_improvement_behavior: String,
     #[clap(long, default_value = "true")]
     post_only: bool,
@@ -221,17 +222,16 @@ async fn main() -> anyhow::Result<()> {
             &[&payer],
             client.get_latest_blockhash().await?,
         );
-        if client
+        match client
             .send_and_confirm_transaction(&transaction)
             .await
             .and_then(|sig| {
                 println!("Updating quotes: {}", sig);
                 Ok(())
-            })
-            .is_err()
-        {
-            println!("Failed to update quotes");
-        };
+            }) {
+            Ok(_) => {}
+            Err(e) => println!("Failed to update quotes: {}", e),
+        }
 
         tokio::time::sleep(std::time::Duration::from_millis(
             quote_refresh_frequency_in_ms,
