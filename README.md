@@ -9,6 +9,6 @@ The goal is to be able to write a client that looks like this:
 ```python
 while True:
   price = await get_fair_price(TOKEN)
-  await market_market.update_orders(price)
+  await market_maker.update_orders(price)
   time.sleep(SLEEP_DURATION)
 ```
