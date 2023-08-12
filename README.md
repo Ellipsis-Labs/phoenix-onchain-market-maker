@@ -2,7 +2,7 @@
 
 This is a reference implementation of a smart contract for an on-chain market making bot.
 
-It stores a quote width in basis points and a quote size and uses this information to update it's current quotes.
+It stores a quote width in basis points and a quote size and uses this information to update its current quotes.
 
 The goal is to be able to write a client that looks like this:
 
