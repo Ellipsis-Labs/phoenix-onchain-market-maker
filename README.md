@@ -12,3 +12,5 @@ while True:
   await market_maker.update_orders(price)
   time.sleep(SLEEP_DURATION)
 ```
+
+This codebase is unaudited and intended to be used for reference only. Use it at your own risk.
