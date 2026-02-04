@@ -1,4 +1,4 @@
-# Phoenix On-chain Market Maker
+# Phoenix Legacy On-chain Market Maker
 
 This is a reference implementation of a smart contract for an on-chain market making bot.
 
